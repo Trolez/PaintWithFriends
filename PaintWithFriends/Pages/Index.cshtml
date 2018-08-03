@@ -1,0 +1,277 @@
+﻿@page
+@model IndexModel
+@{
+    ViewData["Title"] = "Home page";
+}
+
+<div id="paint">
+  	<canvas id="canvas" height="600"></canvas>
+</div>
+
+<div id="bottom-items">
+    <div class="module-container" id="color-picker-basic">
+        <div class="color" style="background-color: black;"></div>
+        <div class="color" style="background-color: gray;"></div>
+        <div class="color" style="background-color: darkgray;"></div>
+        <div class="color" style="background-color: lightgray;"></div>
+        <div class="color" style="background-color: white;"></div>
+        <div class="color" style="background-color: darkgreen;"></div>
+        <div class="color" style="background-color: green;"></div>
+        <div class="color" style="background-color: lightgreen;"></div>
+        <div class="color" style="background-color: darkblue;"></div>
+        <div class="color" style="background-color: blue;"></div>
+        <div class="color" style="background-color: lightblue;"></div>
+        <div class="color" style="background-color: orangered;"></div>
+        <div class="color" style="background-color: orange;"></div>
+        <div class="color" style="background-color: yellow;"></div>
+        <div class="color" style="background-color: lightyellow;"></div>
+        <div class="color" style="background-color: darkred;"></div>
+        <div class="color" style="background-color: red;"></div>
+        <div class="color" style="background-color: lightcoral;"></div>
+        <div class="color" style="background-color: indigo;"></div>
+        <div class="color" style="background-color: purple;"></div>
+        <div class="color" style="background-color: magenta;"></div>
+        <div class="color" style="background-color: pink;"></div>
+        <div class="color" style="background-color: cyan;"></div>
+        <div class="color" style="background-color: saddlebrown;"></div>
+        <div class="color" style="background-color: brown;"></div>
+        <div class="color" style="background-color: sandybrown;"></div>
+        <div class="color" style="background-color: beige;"></div>
+    </div>
+
+    <div class="module-container" id="mode-selector">
+        <div class="mode active" id="brush"></div>
+        <div class="mode" id="bucket"></div>
+    </div>
+
+    <div class="module-container" id="preview-container">
+        <div id="preview">
+            <div></div>
+        </div>
+        Brush size:
+        <input type="range" min="1" max="100" value="3" class="slider" id="pencilSize">
+    </div>
+</div>
+<div id="sidebar">
+</div>
+
+<script>
+    var mouse = { x: 0, y: 0, mode: 'brush' };
+    var canvas = document.getElementById('canvas');
+    var isPainting = false;
+
+    const connection = new signalR.HubConnectionBuilder().withUrl("/paintHub").build();
+    connection.start().catch(err => console.error(err.toString()));
+
+    connection.on("MoveMouse", (x, y, isPainting) => {
+        mouse.x = x;
+        mouse.y = y;
+
+        if (isPainting) {
+            onPaint();
+        }
+    });
+
+    canvas.addEventListener('mousemove', function(e) {
+        var x = e.pageX - this.offsetLeft;
+        var y = e.pageY - this.offsetTop;
+        connection.invoke("MoveMouse", x, y, isPainting).catch(err => console.error(err.toString()));
+    }, false);
+
+    function getRandomFloat(min, max) {
+        return Math.random() * (max - min) + min;
+    }
+
+    var ctx = canvas.getContext('2d');
+ 
+    var painting = document.getElementById('paint');
+    var paint_style = getComputedStyle(painting);
+    canvas.width = parseInt(paint_style.getPropertyValue('width'));
+    canvas.height = parseInt(paint_style.getPropertyValue('height'));
+ 
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#000';
+    ctx.fillStyle = '#000';
+    ctx.mozImageSmoothingEnabled = false;
+    ctx.webkitImageSmoothingEnabled = false;
+    ctx.msImageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = false;
+
+    var sprayInterval;
+
+    connection.on("MouseDown", () => {
+        if (mouse.mode == 'bucket') {
+            bucketFill(mouse.x, mouse.y);
+        } else if (mouse.mode == 'brush') {
+            isPainting = true;
+            ctx.beginPath();
+            ctx.moveTo(mouse.x, mouse.y);
+            onPaint();
+
+        } else if (mouse.mode == 'airbrush') {
+            sprayInterval = setInterval(spray, 5);
+        }
+    });
+
+    canvas.addEventListener('mousedown', function (e) {
+        connection.invoke("MouseDown").catch(err => console.error(err.toString()));
+    }, false);
+
+    connection.on("MouseUp", () => {
+        isPainting = false;
+        clearInterval(sprayInterval);
+    });
+ 
+    canvas.addEventListener('mouseup', function () {
+        connection.invoke("MouseUp").catch(err => console.error(err.toString()));
+    }, false);
+
+    //Color picker
+    var colorPickerBasic = document.getElementById('color-picker-basic');
+
+    colorPickerBasic.addEventListener('click', function (event) {
+        if (event.target.className != 'color') return;
+
+        connection.invoke("ChangeColor", event.target.style.backgroundColor).catch(err => console.error(err.toString()));
+    }, false);
+
+    connection.on("ChangeColor", (color) => {
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+
+        pencilSizePreview.style.backgroundColor = color;
+    });
+
+    //Mode picker
+    var modePicker = document.getElementById('mode-selector');
+
+    connection.on("ChangeMode", (mode) => {
+        var active = document.querySelector("#mode-selector .mode.active");
+
+        if (active != null) {
+            active.classList.remove('active');
+        }
+
+        var element = document.querySelector("#mode-selector #" + mode);
+        element.classList.add("active");
+
+        mouse.mode = mode;
+    });
+
+    modePicker.addEventListener('click', function (event) {
+        if (event.target.className != 'mode') return;
+
+        connection.invoke("ChangeMode", event.target.id).catch(err => console.error(err.toString()));
+    }, false);
+
+    //Change brush size
+    var pencilSize = document.getElementById('pencilSize');
+    var pencilSizePreview = document.querySelector("#preview > div");
+
+    connection.on("ChangeBrushSize", (size) => {
+        ctx.lineWidth = size;
+        pencilSizePreview.style.width = size + 3 + 'px';
+        pencilSizePreview.style.height = size + 3 + 'px';
+    });
+
+    pencilSize.addEventListener("input", function () {
+        connection.invoke("ChangeBrushSize", pencilSize.value).catch(err => console.error(err.toString()));
+    }, false);
+ 
+    var onPaint = function() {
+        ctx.lineTo(mouse.x, mouse.y);
+        ctx.stroke();
+    };
+
+    var spray = function () {
+        var angle = Math.random() * Math.PI * 2;
+        var radius = Math.random() * ctx.lineWidth / 2;
+
+        ctx.fillRect(
+            Math.round(mouse.x + Math.cos(angle) * radius),
+            Math.round(mouse.y + Math.sin(angle) * radius),
+            1, 1
+        );
+    }
+
+    function bucketFill(startX, startY) {
+        var imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        var startColor = ctx.getImageData(startX, startY, 1, 1);
+
+        ctx.fillRect(startX, startY, 1, 1);
+        var fillColor = ctx.getImageData(startX, startY, 1, 1);
+
+        //Stack of pixels to process
+        pixelStack = [[startX, startY]];
+
+        if (startColor.data[0] == fillColor.data[0] && startColor.data[1] == fillColor.data[1] && startColor.data[2] == fillColor.data[2]) {
+            return;
+        }
+
+        var newPos, x, y, pixelPos, reachLeft, reachRight;
+        while (pixelStack.length) {
+            newPos = pixelStack.pop();
+            x = newPos[0];
+            y = newPos[1];
+
+            pixelPos = (y * canvas.width + x) * 4;
+
+            while (y-- >= 0 && matchStartColor(pixelPos)) {
+                pixelPos -= canvas.width * 4;
+            }
+            pixelPos += canvas.width * 4;
+
+            reachLeft = false;
+            reachRight = false;
+            while (++y < canvas.height - 1 && matchStartColor(pixelPos)) {
+                colorPixel(pixelPos);
+
+                if (x > 0) {
+                    if (matchStartColor(pixelPos - 4)) {
+                        if (!reachLeft) {
+                            pixelStack.push([x - 1, y]);
+                            reachLeft = true;
+                        }
+                    } else if (reachLeft) {
+                        reachLeft = false;
+                    }
+                }
+
+                if (x < canvas.width - 1) {
+                    if (matchStartColor(pixelPos + 4)) {
+                        if (!reachRight) {
+                            pixelStack.push([x + 1, y]);
+                            reachRight = true;
+                        }
+                    } else if (reachRight) {
+                        reachRight = false;
+                    }
+                }
+
+                pixelPos += canvas.width * 4;
+            }
+        }
+
+        ctx.putImageData(imgData, 0, 0);
+
+        function matchStartColor(pixelPos) {
+            var r = imgData.data[pixelPos];
+            var g = imgData.data[pixelPos + 1];
+            var b = imgData.data[pixelPos + 2];
+
+            return (r == startColor.data[0] && g == startColor.data[1] && b == startColor.data[2]);
+        }
+
+        function colorPixel(pixelPos) {
+            imgData.data[pixelPos] = fillColor.data[0];
+            imgData.data[pixelPos + 1] = fillColor.data[1];
+            imgData.data[pixelPos + 2] = fillColor.data[2];
+            imgData.data[pixelPos + 3] = 255;
+        }
+    }
+</script>
